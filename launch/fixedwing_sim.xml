@@ -1,0 +1,20 @@
+<launch>
+    <arg name="use_joystick" default="false"/>
+
+    <node pkg="cyecca" exec="fixedwing_sim.py" output="screen"/>
+    <node pkg="auav_pylon_2025" exec="sim_tecs_ros_xtrack.py" output="screen"/>
+    <!--<node pkg="joy" exec="joy_node"/>-->
+    <node pkg="rviz2" exec="rviz2" args="-d $(find-pkg-prefix auav_pylon_2025)/share/auav_pylon_2025/config/nvp_sim.config.rviz">
+        <param name="use_sim_time" value="true"/>
+    </node>
+    <include file="$(find-pkg-prefix nightvapor_description)/share/nightvapor_description/launch/robot_description.launch.py"/>
+    <node
+    pkg="joy"
+    exec="joy_node"
+    name="joystick"
+    output="screen"
+    if="$(var use_joystick)"
+    />
+</launch>
+
+<!-- vi: ts=4 sw=4 et -->
