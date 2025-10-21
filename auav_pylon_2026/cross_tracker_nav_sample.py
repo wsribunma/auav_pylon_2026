@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import numpy as np
 
 ######################
@@ -10,7 +9,7 @@ def angle_rad_wrapper(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
 
-class XTrack_NAV:
+class XTrack_NAV_lookAhead:
     def __init__(self, dt, waypoints, start_WP_ind):
         self.dt = dt
 
@@ -27,13 +26,17 @@ class XTrack_NAV:
         self.v_min_horz = (
             0.5  # minimum horizontal velocity m/s enforce to prevent stall
         )
-        self.v_cruise = 0.5  # cruise airspeed
+        self.v_cruise = 10.0  # cruise airspeed (scaled)
         self.wpt_rad = 3.0  # allowable error from target waypoint (m)
 
         self.wpt_switching_distance = (
-            4.0  # Look ahead for 3 m along track and jump to next waypoint
+            1.0  # Look ahead for x meters along track and jump to next waypoint
         )
-        self.path_distance_buf = 2.0  # Cross-track distance buffer
+        self.path_distance_buf = 5.0  # Cross-track distance buffer
+
+        self.lookahead_time_s = 2.0  # seconds to look ahead along path
+        self.lookahead_min_m = 2.0  # never look ahead less than this distance
+        self.lookahead_max_m = 20.0  # cap look-ahead to prevent cutting corners
 
     def get_desired_flight(
         self, next_wpt, current_pose, Vx_speed, Vy_speed, verbose=False
@@ -55,6 +58,7 @@ class XTrack_NAV:
             des_gamma = (
                 K_h * z_err / horz_dist_err
             )  # Alternatively, this can be calculated from vertical-track error
+            # des_gamma = np.arctan((K_h*z_err)/horz_dist_err) #Alternatively, this can be calculated from cross-track error
 
         # # Compute along-track and cross-track error
         V_vector = np.array([Vx_speed, Vy_speed])
@@ -84,21 +88,25 @@ class XTrack_NAV:
 
         pose_vect = [x_est, y_est] - np.array(self.prev_wpt)[:2]
 
-        along_track_err_w0 = np.dot(
-            pose_vect, unit_along_path
-        )  # along track error from prev_wpt w0
-        along_track_err_w1 = (
-            path_len - along_track_err_w0
-        )  # along track error based on w2
-        cross_track_err = np.dot(pose_vect, unit_normal)
+        # Along-track and cross-track components
+        along_track_err_w0 = np.dot(pose_vect, unit_along_path)  # from prev_wpt
+        along_track_err_w1 = max(
+            0.0, path_len - np.clip(along_track_err_w0, 0.0, path_len)
+        )
+        cross_track_err = np.dot(pose_vect, unit_normal)  # signed
 
-        ### Cross track heading
-        des_heading = path_angle + np.arctan2(
-            -1 * cross_track_err, self.path_distance_buf
-        )  # Obtain vector field for heading angle tracking
-        des_heading = (des_heading + np.pi) % (
-            2 * np.pi
-        ) - np.pi  # normalize heading to [-pi, pi]
+        # Dynamic look-ahead (speed-based)
+        V_speed_horz = max(np.linalg.norm([Vx_speed, Vy_speed]), 1e-3)
+        Ld_nom = np.clip(
+            V_speed_horz * self.lookahead_time_s,
+            self.lookahead_min_m,
+            self.lookahead_max_m,
+        )
+        Ld_eff = min(Ld_nom, along_track_err_w1)
+
+        # Vector-field heading: tangent + lateral correction by cross-track
+        des_heading = path_angle + np.arctan2(-cross_track_err, Ld_eff)
+        des_heading = (des_heading + np.pi) % (2 * np.pi) - np.pi
 
         if verbose == True:
             print(
@@ -152,14 +160,25 @@ class XTrack_NAV:
             )
         return des_v, des_gamma, des_heading, along_track_err, cross_track_err
 
-    def check_arrived(self, along_track_err, verbose=False):
-        # Horizontal Distance Waypoint checker
+    def check_arrived(self, along_track_err, V_array, verbose=False):
+        # Lateral Waypoint checker
         # Check based on along-track error
-        if along_track_err < self.wpt_switching_distance:
+
+        # Switch when remaining distance to w1 is less than the *current* look-ahead
+
+        Vg = max(np.linalg.norm(V_array[:2]), 1e-3)
+        Ld_nom = np.clip(
+            Vg * self.lookahead_time_s, self.lookahead_min_m, self.lookahead_max_m
+        )
+        threshold = max(self.wpt_switching_distance, Ld_nom)
+
+        # along_remaining is the distance to the next waypoint along the segment
+        if along_track_err < threshold:
             self.current_WP_ind += 1
             print(f"Waypoint reached, going to waypoint {self.current_WP_ind}...")
 
         if verbose == True:
+            print(f"ALong track Error : {along_track_err:.2f}")
             print(f"Updated Waypoint Index: {self.current_WP_ind}")
 
         return self.current_WP_ind

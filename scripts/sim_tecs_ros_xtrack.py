@@ -4,50 +4,38 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Odometry, Path
 from sensor_msgs.msg import Joy
-from std_msgs.msg import String
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, String
+from std_srvs.srv import Trigger
 from tf_transformations import euler_from_quaternion
 import casadi as ca
 import numpy as np
-from auav_pylon_2025.tecs_xtrack_sample import TECSControl
-from auav_pylon_2025.cross_tracker import *
 
+from auav_pylon_2026.tecs_controller_xtrack_sample import TECSControl_cub
+
+from auav_pylon_2026.cross_tracker_nav_sample import *
 
 def wrap(x):
     return (x % 1) - 1
 
 
 dt = 0.01
-alt = 5#3  # Desired Cruising altitude (m)
+alt = 4  # Desired Cruising altitude (m)
 
-## SIM Coordinate Waypoints
-x0 = 3.2
-y0 = 0.0
-theta0 = 0
-xf = 10.0
-yf = -20.0
+# ## SIM
+alt = 7.0
 control_point = [
-    (x0, y0, 0),
-    (35.0, 0.0, alt),
-    (45.0, 0.0, alt),
-    (45.0, 25.0, alt),
-    (-8.0, 25.0, alt),
-    (-10.0, 1.0, alt),
-    (5, -15.0, 2.0),
-    (xf, yf, 0.1),
-]
+    (-10, -5, alt),
+    (-30.0, -10, alt),
+    (-30, -40.0, alt),
+    (30.00, -30.0, alt),
+    (30, 5.0, alt),
+    (10, 5, alt),
+    (-10, -5, alt),
+]  # Rectangle Circuit Full Facility, const altitude
 
-## PURT Circuit
-x0 = -3#1.6
-y0 = 3.2#2.54
-# theta0 = 2.97
-# xf = 0.0
-# yf = 10.0
-xf = -3#1.6
-yf = 3.2#2.54
-#
+# ## PURT Circuit in Real Facility 
+# control_point = [(3.88, -6.1, alt), (-4.0, -5,alt), (-3, 2.0, alt), (15.20, 2.0, alt),(15, -3.22, alt), (5.88, -6.1, alt)] #Rectangle Circuit Full Facility, const altitude
 
-control_point = [(x0, y0, alt), (-14.0, 4.00,alt), (-13.5, 16.0,alt), (-1.5, 16.5,alt),(-1.5, 5.0,alt), (xf, yf,alt)] #Square circuit, const altitude
 
 # Get coordinates for reference line
 ref_x_list = [point[0] for point in control_point]
@@ -55,29 +43,89 @@ ref_y_list = [point[1] for point in control_point]
 ref_z_list = [point[2] for point in control_point]
 
 
+###### FILTER ######
+def _lpf(self, attr: str, new_value, alpha: float):
+    """
+    Exponential low-pass update for a single signal.
+    Creates/uses <attr>_est and <attr>_est_last attributes.
+    Returns the filtered estimate.
+    """
+    if not (0.0 <= alpha <= 1.0):
+        raise ValueError("alpha must be in [0, 1]")
+    last_name = f"{attr}_est_last"
+    est_name = f"{attr}_est"
+
+    last = getattr(self, last_name, None)
+    if last is None:
+        last = new_value  # initialize on first call
+
+    est = alpha * new_value + (1.0 - alpha) * last
+    setattr(self, est_name, est)
+    setattr(self, last_name, est)
+    return est
+
+
+def _lpf_many(self, mapping: dict, alpha: float):
+    """
+    Batch low-pass updates. `mapping` is {attr_name: new_value}.
+    Each `attr_name` will use <name>_est / <name>_est_last.
+    """
+    for name, val in mapping.items():
+        self._lpf(name, val, alpha)
+
+
+##################
+
+
 class PIDPublisher(Node):
     def __init__(self):
-        super().__init__("night_vapor_publisher")
+        super().__init__("sports_cub_publisher")
 
         # Set up Parameter
-        self.declare_parameter("mocap_vehicle_id", "/nightvapor1")
-        self.declare_parameter("frame_id", "/map")  # default to map
+        self.declare_parameter("mocap_vehicle_id", "/sim")
+        self.declare_parameter("frame_id", "/map")
 
         # self.pub_control_input = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.pub_joy = self.create_publisher(Joy, "/auto_joy", 10)
-        # self.sub_mocap = self.create_subscription(Odometry, self.get_parameter('mocap_vehicle_id').get_parameter_value().string_value+'/odom', self.pose_cb, 10)
+        # self.pub_joy = self.create_publisher(Joy, '/auto_joy', 10)
+        self.pub_joy = self.create_publisher(
+            Joy,
+            self.get_parameter("mocap_vehicle_id").get_parameter_value().string_value
+            + "/auto_joy",
+            10,
+        )
         self.sub_mocap = self.create_subscription(
-            Odometry, "/odom", self.pose_cb, 10
-        )  # temporary with no namespace
-        # self.pub_ref_point = self.create_publisher(PoseStamped, '/ref_point', 10)
-        self.pub_ref_path = self.create_publisher(Path, "/ref_path", 10)
-        self.pub_path = self.create_publisher(Path, "/path_real", 10)
-        self.pub_ref_val = self.create_publisher(Float32MultiArray, "ref_values", 10)
+            Odometry,
+            self.get_parameter("mocap_vehicle_id").get_parameter_value().string_value
+            + "/odom",
+            self.pose_cb,
+            10,
+        )
+        self.pub_ref_path = self.create_publisher(
+            Path,
+            self.get_parameter("mocap_vehicle_id").get_parameter_value().string_value
+            + "/ref_path",
+            10,
+        )
+        self.pub_path = self.create_publisher(
+            Path,
+            self.get_parameter("mocap_vehicle_id").get_parameter_value().string_value
+            + "/path_real",
+            10,
+        )
+        self.pub_ref_val = self.create_publisher(
+            Float32MultiArray,
+            self.get_parameter("mocap_vehicle_id").get_parameter_value().string_value
+            + "/ref_values",
+            10,
+        )
         self.pub_actual_val = self.create_publisher(
-            Float32MultiArray, "actual_values", 10
+            Float32MultiArray,
+            self.get_parameter("mocap_vehicle_id").get_parameter_value().string_value
+            + "/actual_values",
+            10,
         )
         self.timer_path = self.create_timer(1, self.publish_ref_path)
-        self.timer = self.create_timer(0.01, self.pub_night_vapor)
+        self.timer = self.create_timer(0.01, self.pub_sports_cub)
         self.x = 0.0
         self.y = 0.0
         self.z = 0.0
@@ -86,12 +134,15 @@ class PIDPublisher(Node):
         self.yaw = 0.0
         self.time = 0
         self.dt = 0.01
-        self.tecs_control = TECSControl(self.dt, 3)  # 1 denotes nv1, 3 denotes sim
-        self.current_WP_ind = 0  # Current Waypoint Index
-        self.last_WP_ind = 1  # Last Waypoint Index
-        self.wpt_planner = XTrack_NAV(self.dt, control_point, self.current_WP_ind)
-        self.wpt_planner.path_distance_buf = 2.0
-        self.wpt_planner.wpt_switching_distance = 4.0
+        self.tecs_control = TECSControl_cub(self.dt, "sim")
+        self.current_WP_ind = 0  # Starting WP index
+        self.last_WP_ind = 1  # Last Waypoint Index, this gets overwritten later
+        self.wpt_planner = XTrack_NAV_lookAhead(
+            self.dt, control_point, self.current_WP_ind
+        )
+        self.wpt_planner.path_distance_buf = 5.0  # 2.0
+        self.wpt_planner.wpt_switching_distance = 1.0  # 4.0
+        self.wpt_planner.v_cruise = 10.0  # 0.5
         self.flight_mode = "takeoff"
         self.pub_flight_mode = self.create_publisher(String, "flight_mode", 10)
         self.takeoff_time = 0.0
@@ -104,14 +155,14 @@ class PIDPublisher(Node):
         self.throttle = 0.7
         self.rudder = 0.0
         self.elev = 0.0  # elevator command (negative=elev_down --> pitches up)
-        self.ail_roll = 0.0  # roll
+        self.aileron = 0.0  # roll
         self.trail_size = 1000
         self.x_est = None
         self.prev_x = None
-        self.x_est_last = None
+        # self.x_est_last = None
         self.y_est = None
         self.prev_y = None
-        self.y_est_last = None
+        # self.y_est_last = None
         self.z_est = None
         self.prev_z = None
         self.prev_roll = None
@@ -119,29 +170,20 @@ class PIDPublisher(Node):
         self.prev_yaw = None
         self.prev_v = None
         self.roll_est = None
-        self.roll_est_last = None
         self.pitch_est = None
-        self.pitch_est_last = None
         self.v_est = None
-        self.v_est_last = None
         self.p_est = None
-        self.p_est_last = None
+        self.q_est = None
         self.r_est = None  # Yaw rate
-        self.r_est_last = None
         self.z_est = None  # Altitude filtering
-        self.z_est_last = None
         self.yaw_est = None  # Heading filtering
-        self.yaw_est_last = None
         self.vx_est = None
-        self.vx_est_last = None
         self.vy_est = None
         self.vy_est_last = None
         self.vz_est = None
-        self.vz_est_last = None
         self.gamma_est = None
         self.gamma_est_last = None
         self.vdot_est = None
-        self.vdot_est_last = None
         self.end_cruise = False  # flight tag for end of cruise
         self.des_a = None
         self.prev_des_a = None
@@ -165,172 +207,145 @@ class PIDPublisher(Node):
             "v_est": 0.0,
             "gamma_est": 0.0,
             "vdot_est": 0.0,
+            "p_est": 0.0,
+            "q_est": 0.0,
             "r_est": 0.0,
         }
 
+    @staticmethod
+    def _angdiff(a, b):
+        return (a - b + np.pi) % (2 * np.pi) - np.pi
+
+    def _lpf(self, name: str, new_value, alpha: float):
+        """
+        Exponential low-pass update for <name>.
+        Uses/creates attributes: <name>_est and <name>_est_last.
+        """
+        if not (0.0 <= alpha <= 1.0):
+            raise ValueError("alpha must be in [0, 1]")
+        last_name = f"{name}_est_last"
+        est_name = f"{name}_est"
+
+        last = getattr(self, last_name, None)
+        if last is None:
+            last = new_value  # initialize on first call
+
+        est = alpha * new_value + (1.0 - alpha) * last
+        setattr(self, est_name, est)
+        setattr(self, last_name, est)
+        return est
+
+    def _lpf_many(self, mapping: dict, alpha: float):
+        """Batch low-pass updates: mapping = {name: new_value}."""
+        for k, v in mapping.items():
+            self._lpf(k, v, alpha)
+
+    def reload_gains_callback(self, request, response):
+        # Trigger to call to reload param and gains
+        # ros2 service call /reload_gains std_srvs/srv/Trigger
+        try:
+            self.controller.reload_gains()
+            response.success = True
+            response.message = "Gains reloaded successfully."
+        except Exception as e:
+            self.get_logger().error(f"Failed to reload gains: {e}")
+            response.success = False
+            response.message = str(e)
+        return response
+
     def pose_cb(self, msg: Odometry):
+        # Unpack raw data from topic
         self.x = msg.pose.pose.position.x
         self.y = msg.pose.pose.position.y
         self.z = msg.pose.pose.position.z
-        orientation_q = msg.pose.pose.orientation
-        orientation_list = [
-            orientation_q.x,
-            orientation_q.y,
-            orientation_q.z,
-            orientation_q.w,
-        ]
-        (self.roll, self.pitch, self.yaw) = euler_from_quaternion(orientation_list)
+        q = msg.pose.pose.orientation
+        (self.roll, self.pitch, self.yaw) = euler_from_quaternion([q.x, q.y, q.z, q.w])
 
-        # self.get_logger().info(
-        #     "pose: x: %0.2f; y: %0.2f: z: %0.2f" % (self.x, self.y, self.z)
-        # )
-
+        # Initialize on first time step
         if self.prev_x is None:
-            self.prev_x = self.x
-            self.prev_y = self.y
-            self.prev_z = self.z
-            self.prev_roll = self.roll
-            self.prev_pitch = self.pitch
-            self.prev_yaw = self.yaw
+            self.prev_x, self.prev_y, self.prev_z = self.x, self.y, self.z
+            self.prev_roll, self.prev_pitch, self.prev_yaw = (
+                self.roll,
+                self.pitch,
+                self.yaw,
+            )
             self.prev_speed = np.sqrt(self.x**2 + self.y**2 + self.z**2)
 
-        alpha = np.exp(-2 * np.pi * 10 * self.dt)  # exp(w*T)
-        # # alpha = 0.001
+        fc = 10.0  # Hz
+        alpha = np.exp(-2 * np.pi * fc * self.dt)
 
-        v_est_new = (
-            np.sqrt(self.x**2 + self.y**2 + self.z**2)
-            - np.sqrt(self.prev_x**2 + self.prev_y**2 + self.prev_z**2)
-        ) / self.dt  # Velocity
-        if self.v_est_last is None:
-            self.v_est_last = v_est_new
-        self.v_est = v_est_new * alpha + self.v_est_last * (1 - alpha)
-        self.v_est_last = self.v_est
+        # Finite differences
+        vx_new = (self.x - self.prev_x) / self.dt
+        vy_new = (self.y - self.prev_y) / self.dt
+        vz_new = (self.z - self.prev_z) / self.dt
+        speed_new = np.sqrt(vx_new**2 + vy_new**2 + vz_new**2)
 
-        x_est_new = self.x
-        if self.x_est_last is None:
-            self.x_est_last = x_est_new
-        self.x_est = x_est_new * alpha + self.x_est_last * (1 - alpha)
-        self.x_est_last = self.x_est
+        # Angular rates from successive Euler angles (wrap yaw)
+        p_new = self._angdiff(self.roll, self.prev_roll) / self.dt
+        q_new = self._angdiff(self.pitch, self.prev_pitch) / self.dt
+        r_new = self._angdiff(self.yaw, self.prev_yaw) / self.dt
 
-        y_est_new = self.y
-        if self.y_est_last is None:
-            self.y_est_last = y_est_new
-        self.y_est = y_est_new * alpha + self.y_est_last * (1 - alpha)
-        self.y_est_last = self.y_est
+        eps = 1e-5
+        denom = max(speed_new, eps)
+        gamma_new = np.arcsin(
+            np.clip(vz_new / denom, -1.0, 1.0)
+        )  # Flight path angle (gamma): asin(vz / |v|)
 
-        z_est_new = self.z
-        if self.z_est_last is None:
-            self.z_est_last = z_est_new
-        self.z_est = z_est_new * alpha + self.z_est_last * (1 - alpha)
-        self.z_est_last = self.z_est
+        vdot_new = (
+            speed_new - self.prev_speed
+        )  # / self.dt # Acceleration magnitutde diff
 
-        x_est_new = self.x
-        if self.x_est_last is None:
-            self.x_est_last = x_est_new
-        self.x_est = x_est_new * alpha + self.x_est_last * (1 - alpha)
-        self.x_est_last = self.x_est
-
-        # filter roll
-        roll_est_new = self.roll
-        if self.roll_est_last is None:
-            self.roll_est_last = roll_est_new
-        self.roll_est = roll_est_new * alpha + self.roll_est_last * (1 - alpha)
-        self.roll_est_last = self.roll_est
-
-        # filter Pitch
-        pitch_est_new = self.pitch
-        if self.pitch_est_last is None:
-            self.pitch_est_last = pitch_est_new
-        self.pitch_est = pitch_est_new * alpha + self.pitch_est_last * (1 - alpha)
-        self.pitch_est_last = self.pitch_est
-
-        # filter heading
-        yaw_est_new = self.yaw
-        if self.yaw_est_last is None:
-            self.yaw_est_last = yaw_est_new
-        self.yaw_est = yaw_est_new * alpha + self.yaw_est_last * (1 - alpha)
-        self.yaw_est_last = self.yaw_est
-
-        vx_est_new = (self.x - self.prev_x) / self.dt  # Vx
-        if self.vx_est_last is None:
-            self.vx_est_last = vx_est_new
-        self.vx_est = vx_est_new * alpha + self.vx_est_last * (1 - alpha)
-        self.vx_est_last = self.vx_est
-
-        vy_est_new = (self.y - self.prev_y) / self.dt  # Vy
-        if self.vy_est_last is None:
-            self.vy_est_last = vy_est_new
-        self.vy_est = vy_est_new * alpha + self.vy_est_last * (1 - alpha)
-        self.vy_est_last = self.vy_est
-
-        vz_est_new = (self.z - self.prev_z) / self.dt  # Vz
-        if self.vz_est_last is None:
-            self.vz_est_last = vz_est_new
-        self.vz_est = vz_est_new * alpha + self.vz_est_last * (1 - alpha)
-        self.vz_est_last = self.vz_est
-
-        p_est_new = self.roll - self.prev_roll
-        r_est_new = self.yaw - self.prev_yaw  # change in yaw
-        if self.p_est_last is None:
-            self.p_est_last = p_est_new
-        if self.r_est_last is None:
-            self.r_est_last = r_est_new
-        self.p_est = p_est_new * alpha + self.p_est_last * (1 - alpha)
-        self.r_est = r_est_new * alpha + self.r_est_last * (1 - alpha)
-        self.p_est_last = self.p_est
-        self.r_est_last = self.r_est
-
-        # Flight Path Angle Estimated GAMMA
-        # v_temp = (np.sqrt(self.x**2+self.y**2+self.z**2) - np.sqrt(self.prev_x**2+self.prev_y**2+self.prev_z**2))/self.dt
-        v_temp = self.v_est
-        if np.abs(v_temp) < 1e-5:
-            v_temp = 1e-5  # avoid divide by zero error
-        gamma_est_new = np.arcsin(
-            np.clip(((self.z - self.prev_z) / self.dt) / np.abs(v_temp), -1, 1)
+        # Low-pass filer
+        self._lpf_many(
+            {
+                "x": self.x,
+                "y": self.y,
+                "z": self.z,
+                "roll": self.roll,
+                "pitch": self.pitch,
+                "yaw": self.yaw,
+                "vx": vx_new,
+                "vy": vy_new,
+                "vz": vz_new,
+                "v": speed_new,
+                "gamma": gamma_new,
+                "vdot": vdot_new,
+                "p": p_new,
+                "q": q_new,
+                "r": r_new,
+            },
+            alpha,
         )
-        if self.gamma_est_last is None:
-            self.gamma_est_last = gamma_est_new
-        self.gamma_est = gamma_est_new * alpha + self.gamma_est_last * (1 - alpha)
-        self.gamma_est_last = self.gamma_est
-
-        # Acceleration
-        # speed_temp = np.sqrt(self.x**2+self.y**2+self.z**2)
-        vdot_est_new = v_temp - self.prev_speed  # /self.dt
-        if self.vdot_est_last is None:
-            self.vdot_est_last = vdot_est_new
-        self.vdot_est = vdot_est_new * alpha + self.vdot_est_last * (1 - alpha)
-        self.vdot_est_last = self.vdot_est
 
         self.actual_data = {
             "x_est": self.x_est,
             "y_est": self.y_est,
-            "z_est": self.z_est,
+            "z_est": self.z_est,  # Position
             "roll_est": self.roll_est,
             "pitch_est": self.pitch_est,
-            "yaw_est": self.yaw_est,
+            "yaw_est": self.yaw_est,  # Euler Orientation
             "vx_est": self.vx_est,
             "vy_est": self.vy_est,
-            "vz_est": self.vz_est,
+            "vz_est": self.vz_est,  # Velocity
             "v_est": self.v_est,
             "gamma_est": self.gamma_est,
             "vdot_est": self.vdot_est,
-            "r_est": self.r_est,
+            "p_est": self.p_est,
+            "q_est": self.q_est,
+            "r_est": self.r_est,  # Angular Rates
         }
 
-        self.prev_x = self.x
-        self.prev_y = self.y
-        self.prev_z = self.z
+        # Update history
+        self.prev_x, self.prev_y, self.prev_z = self.x, self.y, self.z
+        self.prev_roll, self.prev_pitch, self.prev_yaw = self.roll, self.pitch, self.yaw
         self.prev_speed = self.v_est
-        self.prev_roll = self.roll
-        self.prev_pitch = self.pitch
-        self.prev_yaw = self.yaw
 
-    def pub_night_vapor(self):
+    def pub_sports_cub(self):
         self.last_WP_ind = np.shape(control_point)[0]  # determine last waypoint
 
-        ######################################## FLIGHT MODE HANDLING ####################################
+        ######################################## FLIGHT MODE ####################################
         flight_mode_msg = String()
-        if (self.z <= 0.5) and self.end_cruise == False:
+        if (self.z <= 1.0) and self.end_cruise == False:
             new_mode = "takeoff"
         else:
             new_mode = "airborne"
@@ -347,39 +362,51 @@ class PIDPublisher(Node):
 
         self.pub_flight_mode.publish(flight_mode_msg)  # Publish Flight mode
 
-        #################################################################################################
+        ###########################################################################################
 
         self.time += self.dt
 
         if self.flight_mode == "takeoff":
             self.takeoff_time += self.dt
-            self.throttle += 2 * self.dt
-            if self.throttle < 0.7:
-                self.throttle = 0.7
-            self.throttle = ca.if_else(self.throttle > 1, 1.0, self.throttle)
-            self.rudder = 0.0  # Rudder
-            self.elev = 0.15
-            self.ail_roll = 0.0  # Aileron
+
+            # Throttle ramp with floor/ceiling
+            self.throttle = ca.fmin(1.0, ca.fmax(0.7, self.throttle + 2.0 * self.dt))
+
+            self.rudder = 0.0  # TODO use rudder to remain on centerline
+            self.aileron = 0.0  # Wings-level during takeoff
+
+            # Elevator schedule (taildragger hold-down, then smooth pitch-up)
+            v_to = 0.5  # takeoff speed threshold
+            e_down = -0.02  # elevator up while accelerating (tail on ground)
+            e_up = 0.15  # target pitch-up elevator
+            e_rate = 0.40  # max elevator change per second
+            if self.v_est == None:
+                self.v_est = 0.0  # Initialize V_est, assume start at stationary
+
+            self.elev = ca.if_else(
+                self.v_est < v_to, e_down, ca.fmin(e_up, self.elev + e_rate * self.dt)
+            )
 
         # Enforce Looping in cruise
-        if self.current_WP_ind == self.last_WP_ind: 
-            self.current_WP_ind = 0 # go back to cruise altitude waypoint
+        if self.current_WP_ind == self.last_WP_ind:
+            self.current_WP_ind = 0  # go back to cruise altitude waypoint
             self.end_cruise = False
-            self.wpt_planner = XTrack_NAV(self.dt, control_point, self.current_WP_ind)
+            self.wpt_planner = XTrack_NAV_lookAhead(
+                self.dt, control_point, self.current_WP_ind
+            )
 
-            print("Continueing circuit...Returning to Waypoint %s" %(self.current_WP_ind))
+            print(
+                "Continueing circuit...Returning to Waypoint %s" % (self.current_WP_ind)
+            )
 
         if self.flight_mode == "airborne":
-            if (
-                self.current_WP_ind == self.last_WP_ind
-            ):  ## TODO Implement "land" waypoint mode
+
+            if self.current_WP_ind == self.last_WP_ind:  # End Cruise
+                self.current_WP_ind = 0  # go back to cruise altitude waypoint
                 self.end_cruise = False
-                self.current_WP_ind = 0
-                # self.rudder = 0.0
-                # self.elev = 0.0
-                # self.ail_roll = 0.0
-                # self.throttle = 0.0
-                print("ending Cruise")
+                self.wpt_planner = XTrack_NAV_lookAhead(
+                    self.dt, control_point, self.current_WP_ind
+                )
             else:
                 v_array = [self.vx_est, self.vy_est, self.vz_est]
 
@@ -397,10 +424,10 @@ class PIDPublisher(Node):
                 ## Calculating Desired Acceleration based on desired velocity
                 if self.prev_v is None:
                     self.prev_v = self.v_est
-                K_V = 2.0
+                K_V = 1.0  # 2.0
                 self.des_a = K_V * (
                     des_v - np.abs(self.v_est)
-                )  # /self.dt # Desired Acceleration from current velocity
+                )  # Desired Acceleration from current velocity
 
                 self.prev_des_a = self.des_a
                 self.prev_des_v = des_v
@@ -412,17 +439,19 @@ class PIDPublisher(Node):
                     "des_a": self.des_a,
                 }
 
-                self.throttle, self.rudder, self.elev, self.ail_roll = (
+                self.aileron, self.elev, self.throttle, self.rudder = (
                     self.tecs_control.compute_control(
                         int(self.time / self.dt), self.ref_data, self.actual_data
                     )
                 )
+                # self.current_WP_ind = self.wpt_planner.check_arrived(self.x_est, self.y_est, self.z_est)
                 self.current_WP_ind = self.wpt_planner.check_arrived(
-                    along_track_err, verbose=False
+                    along_track_err, v_array, verbose=False
                 )
 
                 self.get_logger().info(
-                    "Current Waypoint: %0.0f" % (self.current_WP_ind)
+                    "Control Command: Aileron: %0.2f: Elevator: %0.2f; Throttle: %0.2f Rudder: %0.2f"
+                    % (self.aileron, self.elev, self.throttle, self.rudder)
                 )
 
         # Publish Reference Data for Analysis
@@ -450,6 +479,8 @@ class PIDPublisher(Node):
             self.actual_data["v_est"],
             self.actual_data["gamma_est"],
             self.actual_data["vdot_est"],
+            self.actual_data["p_est"],
+            self.actual_data["q_est"],
             self.actual_data["r_est"],
         ]
         self.pub_actual_val.publish(actual_val_msg)
@@ -461,19 +492,12 @@ class PIDPublisher(Node):
         joy_msg = Joy()
         joy_msg.axes = [0.0] * 5
 
-        # Night Vapor 3 Channels
-        # joy_msg.axes[0] = self.throttle # Throttle
-        # joy_msg.axes[1] = delta # Rudder
-        # joy_msg.axes[2] = elev # Elevator
-        # joy_msg.axes[3] = 0
-        # joy_msg.axes[4] = 1900 # Force onboard stabilizing
-
-        # Simulator 3-Channel
-        joy_msg.axes[0] = self.throttle # Throttle
-        joy_msg.axes[1] = self.rudder + -1 * self.ail_roll #Rudder Input + "ail_roll" represents auto stabilizer
-        joy_msg.axes[2] = self.elev #Elevator
-        joy_msg.axes[3] = 0
-        joy_msg.axes[4] = 1900  # Force onboard stabilizing
+        # Cub Control PPM AETR
+        joy_msg.axes[0] = self.aileron
+        joy_msg.axes[1] = self.elev
+        joy_msg.axes[2] = self.throttle
+        joy_msg.axes[3] = self.rudder
+        joy_msg.axes[4] = 2000  # Force onboard stabilizing
 
         self.pub_joy.publish(joy_msg)
 

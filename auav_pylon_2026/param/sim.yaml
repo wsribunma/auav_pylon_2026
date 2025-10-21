@@ -1,0 +1,44 @@
+# --- Longitduinal TECS Outer Loop ---
+K_thrustp: 0.1 #0.01
+K_thrusti: 0.303 #0.03
+K_pitchp: 0.5 # 0.075 #0.5 #
+K_pitchi: 0.316
+norm_Es_dot_integral_max: 7.5
+dist_term_integral_max: 7.5
+trim_thrust: 2.5 #2.4
+
+# --- Longitduinal TECS Inner Loop ---
+K_thtlp: 0.1
+K_thtli: 0.01
+K_elevp: 0.37 #0.07
+K_elevi: 0.27 #0.07
+
+K_q: 0.2 #0.22
+K_phi_elev : 2.5
+pitch_integral_max: 0.3
+thrust_integral_max: 1.0
+r_integral_max: 0.4
+xtrack_integral_max: 1.0
+trim_thtl: 0.64
+trim_elev: 0.1 #0.25
+
+# --- Lateral Loop Gains Direct aileron---
+K_deltap: 0.25 #0.3 #0.4 #0.35
+K_deltai: 0.10 #0.15
+K_deltad: 0.0 #0.2
+trim_rud: 0.0 # -0.2
+trim_ail: 0.0
+
+# --- Vehicle Parameters ---
+mass: 0.057 # kg
+
+# --- Lateral Roll Control in Stabilized Sim mode---
+k_chi: 1.20                # [1/s] maps heading error -> desired heading rate
+phi_lim_deg: 30.0         # bank limit
+phi_dot_lim_deg_s: 90.0   # optional slew on bank [deg/s]
+chi_deadband_deg: 1.0     # heading error deadband to fix oscillations [deg]
+K_phi_p: 3.0              # aileron per rad (P on roll error)
+K_phi_i: 01.6              # aileron per rad·s (I on roll error)
+K_phi_d: 0.5              # aileron per (rad/s) (D on roll rate)
+i_phi_max: 0.63            # integral clamp (aileron units)
+da_max: 1.0            
