@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.time import Time
 from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Odometry, Path
 from sensor_msgs.msg import Joy
@@ -13,6 +14,7 @@ import numpy as np
 from auav_pylon_2026.tecs_controller_xtrack_sample import TECSControl_cub
 
 from auav_pylon_2026.cross_tracker_nav_sample import *
+
 
 def wrap(x):
     return (x % 1) - 1
@@ -33,7 +35,7 @@ control_point = [
     (-10, -5, alt),
 ]  # Rectangle Circuit Full Facility, const altitude
 
-# ## PURT Circuit in Real Facility 
+# ## PURT Circuit in Real Facility
 # control_point = [(3.88, -6.1, alt), (-4.0, -5,alt), (-3, 2.0, alt), (15.20, 2.0, alt),(15, -3.22, alt), (5.88, -6.1, alt)] #Rectangle Circuit Full Facility, const altitude
 
 
@@ -211,6 +213,7 @@ class PIDPublisher(Node):
             "q_est": 0.0,
             "r_est": 0.0,
         }
+        self.prev_t = None
 
     @staticmethod
     def _angdiff(a, b):
@@ -254,6 +257,18 @@ class PIDPublisher(Node):
         return response
 
     def pose_cb(self, msg: Odometry):
+        # Get time step
+        t = Time.from_msg(msg.header.stamp).nanoseconds * 1e-9
+        if self.prev_t is None:
+            self.prev_t = t - 0.01
+        dt = t - self.prev_t
+        if dt <= 0:
+            self.prev_t = t - 0.01
+        elif dt == 0:
+            dt = 0.01
+        self.dt = dt
+        self.prev_t = t
+
         # Unpack raw data from topic
         self.x = msg.pose.pose.position.x
         self.y = msg.pose.pose.position.y
@@ -565,9 +580,6 @@ def main(args=None):
     rclpy.init(args=args)
     PID_publisher = PIDPublisher()
     rclpy.spin(PID_publisher)
-    # Destroy the node explicitly
-    # (optional - otherwise it will be done automatically
-    # when the garbage collector destroys the node object)
     PID_publisher.destroy_node()
     rclpy.shutdown()
 
