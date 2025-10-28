@@ -90,7 +90,7 @@ class TECSControl_cub:
 
         #######################################################
         # Envelope Protection Feature
-        drag = 1.0 # Maximum Drag estimate TODO -- can be improved to be a function of velocity
+        drag = 1.0 # Maximum Drag estimate
         # r_gamma = np.clip(r_gamma, -drag/weight, (thr_max-drag)/weight)
         r_V_dot = np.clip(r_V_dot, -drag/self.weight, (self.thr_max-drag)/self.weight)
         # print(f"desired_gamma: {r_gamma:5.2f}, gamma_est: {gamma_est:5.2f} Vdot_ref:{r_V_dot/self.g:5.2f} Vdot_actual:{vdot_est/self.g:5.2f} err_vdot:{(r_V_dot-vdot_est)/self.g:5.2f}")
@@ -212,7 +212,7 @@ class TECSControl_cub:
 
         chi_dot_des = self.param.k_chi * chi_err  # desired yaw rate to correct heading error
         Vg = max(V_est, 0.05) #ground speed, avoid div by zero
-        phi_des = np.arctan2(Vg * chi_dot_des , self.g) #"Modelling and Control of Fixed Wing UAV pg 38"
+        phi_des = np.arctan2(Vg * chi_dot_des , self.g) # Balmer, "Modelling and Control of a Fixed-wing UAV for Landings on Mobile Landing Platforms" (eqn 3.3)
 
         phi_des = float(np.clip(phi_des, -self.phi_lim, self.phi_lim)) 
         dphi_max = self.phi_dot_lim * self.dt

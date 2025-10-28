@@ -266,7 +266,7 @@ class PIDPublisher(Node):
             self.prev_t = t - 0.01
         elif dt == 0:
             dt = 0.01
-        self.dt = dt
+        self.dt = max(dt, 0.01) # prevent dt = 0
         self.prev_t = t
 
         # Unpack raw data from topic
@@ -387,7 +387,7 @@ class PIDPublisher(Node):
             # Throttle ramp with floor/ceiling
             self.throttle = ca.fmin(1.0, ca.fmax(0.7, self.throttle + 2.0 * self.dt))
 
-            self.rudder = 0.0  # TODO use rudder to remain on centerline
+            self.rudder = 0.0  # No yaw during takeoff
             self.aileron = 0.0  # Wings-level during takeoff
 
             # Elevator schedule (taildragger hold-down, then smooth pitch-up)
