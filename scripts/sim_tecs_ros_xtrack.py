@@ -20,9 +20,6 @@ def wrap(x):
     return (x % 1) - 1
 
 
-dt = 0.01
-alt = 4  # Desired Cruising altitude (m)
-
 # ## SIM
 alt = 7.0
 control_point = [
@@ -34,10 +31,6 @@ control_point = [
     (10, 5, alt),
     (-10, -5, alt),
 ]  # Rectangle Circuit Full Facility, const altitude
-
-# ## PURT Circuit in Real Facility
-# control_point = [(3.88, -6.1, alt), (-4.0, -5,alt), (-3, 2.0, alt), (15.20, 2.0, alt),(15, -3.22, alt), (5.88, -6.1, alt)] #Rectangle Circuit Full Facility, const altitude
-
 
 # Get coordinates for reference line
 ref_x_list = [point[0] for point in control_point]
@@ -156,9 +149,9 @@ class PIDPublisher(Node):
         self.yaw_list = []
         self.throttle = 0.7
         self.rudder = 0.0
-        self.elev = 0.0  # elevator command (negative=elev_down --> pitches up)
-        self.aileron = 0.0  # roll
-        self.trail_size = 1000
+        self.elev = 0.0  # elevator command
+        self.aileron = 0.0  # aileron command
+        self.trail_size = 200
         self.x_est = None
         self.prev_x = None
         # self.x_est_last = None
@@ -266,7 +259,7 @@ class PIDPublisher(Node):
             self.prev_t = t - 0.01
         elif dt == 0:
             dt = 0.01
-        self.dt = max(dt, 0.01) # prevent dt = 0
+        self.dt = max(dt, 0.01)  # prevent dt = 0
         self.prev_t = t
 
         # Unpack raw data from topic
@@ -439,7 +432,7 @@ class PIDPublisher(Node):
                 ## Calculating Desired Acceleration based on desired velocity
                 if self.prev_v is None:
                     self.prev_v = self.v_est
-                K_V = 1.0  # 2.0
+                K_V = 1.0
                 self.des_a = K_V * (
                     des_v - np.abs(self.v_est)
                 )  # Desired Acceleration from current velocity
@@ -459,7 +452,6 @@ class PIDPublisher(Node):
                         int(self.time / self.dt), self.ref_data, self.actual_data
                     )
                 )
-                # self.current_WP_ind = self.wpt_planner.check_arrived(self.x_est, self.y_est, self.z_est)
                 self.current_WP_ind = self.wpt_planner.check_arrived(
                     along_track_err, v_array, verbose=False
                 )
