@@ -2,6 +2,9 @@
 
 * Purdue Center for AI in Digital, Autonomous, and Augmented Aviation (AIDA^3)
 * Purdue UAS Research and Test Facility (PURT)
+* Rosen Center for Advanced Computing (RCAC)
+
+### **In-person PURT Flight:** December 06, 2025
 
 ## Overview
 The Autonomous Fixed-Wing UAS Pylon Racing Competition is hosted by Purdue’s Center for AI in Digital, Autonomous, and Augmented Aviation (AIDA3) in collaboration with Purdue UAS Research and Test Facility (PURT) and the Rosen Center for Advanced Computing (RCAC). Running about 2 months, the challenge emphasizes learning and rapid deployment: newcomers to robotics and Guidance, Navigation, and Control (GNC) are encouraged. Teams design, integrate, and flight-test autonomy to safely fly fixed-wing aircraft around a pylon course. Further, this challenge focuses on a really important topic of autonomy in aerial vehicles!
