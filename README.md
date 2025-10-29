@@ -62,9 +62,32 @@ ros2 launch auav_pylon_2026 fixedwing_sim.xml
 ```
 The launch script should launch a simulation with RVIZ2 visualizer by default.
 
-The real-time simulation can be viewed from RVIZ2 or other ROS2 topic visualizer. 
+The real-time simulation can be viewed from RVIZ2 or another ROS2 topic visualizer. 
 
-Current simulation allows an optional use of a joystick controller (Logitech f310). The "A" button will toggle the auto model, and "B" button will toggle the manual mode. To enable joystick commands, add a condition ```use_joystick:=true``` when launching the fixedwing_sim.xml script
+The current simulation allows for the optional use of a joystick controller (Logitech f310). The "A" button will toggle the auto model, and "B" button will toggle the manual mode. To enable joystick commands, add a condition ```use_joystick:=true``` when launching the fixedwing_sim.xml script
+
+## ROS2 Topics & Message Format
+
+| Topic name        | Message type               | Array size | Element order (index)                      | Accepted ranges / format                                                                 | Notes                                                                                              |
+|-------------------|----------------------------|------------|--------------------------------------------|-------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `/sim/auto_joy`   | `sensor_msgs/msg/Joy` | 5          | `[0]=Aileron, [1]=Elevator, [2]=Throttle, [3]=Rudder, [4]=Mode` | Aileron/Elevator/Rudder: `[-1.0, +1.0]` • Throttle: `[0.0, 1.0]` • Mode: `{-1.0, 1.0}` | Default order **AETR + Mode**. This is used for Auto mode. |
+| `/sim/joy`   | `sensor_msgs/msg/Joy` | N/A          | `[0]=Aileron, [1]=Elevator, [2]=Throttle, [3]=Rudder, [4]=Mode` | Aileron/Elevator/Rudder: `[-1.0, +1.0]` • Throttle: `[0.0, 1.0]` • Mode: `{-1.0, 1.0}` | Default order **AETR + Mode**. This is used for Manual mode. |
+| `/uav/joy_serial_status`   | `std_msgs/Float32MultiArray` | 5          | `[Aileron, Elevator, Throttle, Rudder, Mode]` | Aileron/Elevator/Throttle/Rudder: `[1000,2000]` | Set of 5 PWM signals to be parsed through serial port to Arduino|
+| `/sim/pose` | `geometry_msgs/msg/Pose.msg` | N/A | `position, orientation`| N/A | Body-frame position relative to world frame, composed with position and quaternion-coordinate orientation |
+| `/sim/odom` | `nav_msgs/msg/Odometry.msg` | N/A | `pose, twist`| N/A | Estimate of position and veloicty in free space |
+
+
+## Input Commands (AETR)
+In the simulator, Joy messages are used for controlling the vehicle; the Joy-to-PWM mappings apply only during the hardware integration. The "Mode" switch does not apply to the simulator. It will only take effect on board a real vehicle.
+
+
+| Index | Channel   | Description                                        | ROS value → PPM (μs) mapping                            | Notes                                                                                 |
+|------:|-----------|----------------------------------------------------|----------------------------------------------------------|---------------------------------------------------------------------------------------|
+| 0     | Aileron   | Roll command                                       | `-1.0 → 1000`, `0.0 → 1500`, `+1.0 → 2000`               | Positive Joy (>1500 μs) = roll left; Negative Joy (<1500 μs>)= roll right                                           |
+| 1     | Elevator  | Pitch command                                      | `-1.0 → 2000`, `0.0 → 1500`, `+1.0 → 1000`               | Positive Joy (<1500 μs) = Elevator up (pitch down); Negative Joy (>1500 μs) = Elevator down (pitch up) |
+| 2     | Throttle  | Throttle                                           | `0.0 → 1000`, `1.0 → 2000`                               | Zero Joy (1000 μs) = Throttle idle; Joy 1.0 (2000 μs) = Full Throttle                                                             |
+| 3     | Rudder    | Yaw command                                        | `-1.0 → 1000`, `0.0 → 1500`, `+1.0 → 2000`               | Positive Joy (>1500 μs)= yaw left; Nagative Joy (<1500 μs) = yaw right                                                                 |
+| 4     | Mode      | Flight mode (discrete)                             | `-1.0 → 1000` (Manual), `1.0 → 2000` (Stabilize)          | Values are treated as discrete states: 1000 = Manual, 2000 = Stabilized|
 
 
 ## Common Issues
